@@ -276,8 +276,12 @@ instance Lift SqlTypeExp where
             mtyp = ConT ''Proxy `AppT` typ
             typedNothing = SigE (ConE 'Proxy) mtyp
             st = VarE 'sqlType `AppE` typedNothing
+#if MIN_VERSION_template_haskell(2,17,0)
+    liftTyped = unsafeCodeCoerce . lift
+#else
 #if MIN_VERSION_template_haskell(2,16,0)
     liftTyped = unsafeTExpCoerce . lift
+#endif
 #endif
 
 data FieldsSqlTypeExp = FieldsSqlTypeExp [FieldDef] [SqlTypeExp]
@@ -285,8 +289,12 @@ data FieldsSqlTypeExp = FieldsSqlTypeExp [FieldDef] [SqlTypeExp]
 instance Lift FieldsSqlTypeExp where
     lift (FieldsSqlTypeExp fields sqlTypeExps) =
         lift $ zipWith FieldSqlTypeExp fields sqlTypeExps
+#if MIN_VERSION_template_haskell(2,17,0)
+    liftTyped = unsafeCodeCoerce . lift
+#else
 #if MIN_VERSION_template_haskell(2,16,0)
     liftTyped = unsafeTExpCoerce . lift
+#endif
 #endif
 
 data FieldSqlTypeExp = FieldSqlTypeExp FieldDef SqlTypeExp
@@ -297,8 +305,12 @@ instance Lift FieldSqlTypeExp where
       where
         FieldDef _x _ _ _ _ _ _ _ _ _ =
             error "need to update this record wildcard match"
+#if MIN_VERSION_template_haskell(2,17,0)
+    liftTyped = unsafeCodeCoerce . lift
+#else
 #if MIN_VERSION_template_haskell(2,16,0)
     liftTyped = unsafeTExpCoerce . lift
+#endif
 #endif
 
 instance Lift EntityDefSqlTypeExp where
@@ -307,8 +319,12 @@ instance Lift EntityDefSqlTypeExp where
               , entityId = $(lift $ FieldSqlTypeExp (entityId ent) sqlTypeExp)
               }
         |]
+#if MIN_VERSION_template_haskell(2,17,0)
+    liftTyped = unsafeCodeCoerce . lift
+#else
 #if MIN_VERSION_template_haskell(2,16,0)
     liftTyped = unsafeTExpCoerce . lift
+#endif
 #endif
 
 deriving instance Lift ReferenceDef
@@ -620,7 +636,7 @@ dataTypeDec mps t = do
          maybeIdType mps fd Nothing Nothing
         )
     (nameFinal, paramsFinal)
-        | mpsGeneric mps = (nameG, [PlainTV backend])
+        | mpsGeneric mps = (nameG, [PlainTV backend ()])
         | otherwise = (name, [])
     nameG = mkName $ unpack $ unEntityNameHS (entityHaskell t) ++ "Generic"
     name = mkName $ unpack $ unEntityNameHS $ entityHaskell t
@@ -1354,8 +1370,8 @@ mkLenses mps ent = fmap mconcat $ forM (entityFields ent) $ \field -> do
         sT = mkST backend1
         tT = mkST backend2
         t1 `arrow` t2 = ArrowT `AppT` t1 `AppT` t2
-        vars = PlainTV fT
-             : (if mpsGeneric mps then [PlainTV backend1{-, PlainTV backend2-}] else [])
+        vars = PlainTV fT SpecifiedSpec
+             : (if mpsGeneric mps then [PlainTV backend1 SpecifiedSpec {-, PlainTV backend2 SpecifiedSpec -}] else [])
     return
         [ SigD lensName $ ForallT vars [mkClassP ''Functor [VarT fT]] $
             (aT `arrow` (VarT fT `AppT` bT)) `arrow`
@@ -1541,7 +1557,7 @@ mkDeleteCascade mps defs = do
             ]
             (ConT ''DeleteCascade `AppT` entityT `AppT` backendT)
             [ FunD 'deleteCascade
-                [normalClause [VarP key] (DoE stmts)]
+                [normalClause [VarP key] (DoE Nothing stmts)]
             ]
 
 -- | Creates a declaration for the @['EntityDef']@ from the @persistent@
@@ -1713,7 +1729,7 @@ mkMigrate fun allDefs = do
                 let defsExp = ListE defs'
                 return $ LetS [ValD (VarP defsName) (NormalB defsExp) []]
               stmts <- mapM (toStmt $ VarE defsName) defs
-              return (DoE $ defsStmt : stmts)
+              return (DoE Nothing $ defsStmt : stmts)
     toStmt :: Exp -> EntityDef -> Q Stmt
     toStmt defsExp ed = do
         u <- liftAndFixKeys entityMap ed
